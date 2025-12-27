@@ -5,6 +5,7 @@
 #include <lvgl.h>
 #include <TFT_eSPI.h>
 #include "config.h"
+#include "weather_images.h"
 
 // Display and LVGL objects
 TFT_eSPI tft = TFT_eSPI();
@@ -19,6 +20,32 @@ lv_obj_t *city_label;
 lv_obj_t *update_label;
 lv_obj_t *status_label;
 lv_obj_t *weather_icon;
+
+struct IconEntry {
+    const char *code;
+    const lv_img_dsc_t *image;
+};
+
+static const IconEntry ICON_MAP[] = {
+    {"01d", &image_weather_icon_01d},
+    {"01n", &image_weather_icon_01n},
+    {"02d", &image_weather_icon_02d},
+    {"02n", &image_weather_icon_02n},
+    {"03d", &image_weather_icon_03d},
+    {"03n", &image_weather_icon_03n},
+    {"04d", &image_weather_icon_04d},
+    {"04n", &image_weather_icon_04n},
+    {"09d", &image_weather_icon_09d},
+    {"09n", &image_weather_icon_09n},
+    {"10d", &image_weather_icon_10d},
+    {"10n", &image_weather_icon_10n},
+    {"11d", &image_weather_icon_11d},
+    {"11n", &image_weather_icon_11n},
+    {"13d", &image_weather_icon_13d},
+    {"13n", &image_weather_icon_13n},
+    {"50d", &image_weather_icon_50d},
+    {"50n", &image_weather_icon_50n},
+};
 
 // Weather data
 struct WeatherData {
@@ -96,12 +123,10 @@ void create_ui() {
     lv_obj_set_style_text_font(city_label, &lv_font_montserrat_18, 0);
     lv_obj_set_pos(city_label, 10, 60);
 
-    // Weather icon - using simple text representation
-    weather_icon = lv_label_create(scr);
-    lv_label_set_text(weather_icon, "---");  // Placeholder
-    lv_obj_set_style_text_color(weather_icon, lv_color_hex(0xFFDD00), 0);
-    lv_obj_set_style_text_font(weather_icon, &lv_font_montserrat_20, 0);
-    lv_obj_set_pos(weather_icon, 10, 95);
+    // Weather icon image placeholder
+    weather_icon = lv_img_create(scr);
+    lv_img_set_src(weather_icon, &image_weather_icon_01d);
+    lv_obj_align(weather_icon, LV_ALIGN_TOP_RIGHT, -8, 56);
 
     // Temperature label
     temp_label = lv_label_create(scr);
@@ -140,42 +165,17 @@ void create_ui() {
 }
 
 // Update weather icon based on OpenWeatherMap icon code
-void update_weather_icon(String icon_code) {
-    // OpenWeatherMap icon codes:
-    // 01d = clear sky day, 01n = clear sky night
-    // 02d/02n = few clouds, 03d/03n = scattered clouds, 04d/04n = broken clouds
-    // 09d/09n = shower rain, 10d/10n = rain, 11d/11n = thunderstorm
-    // 13d/13n = snow, 50d/50n = mist
+void update_weather_icon(const String &icon_code) {
+    const lv_img_dsc_t *icon = &image_weather_icon_01d;
 
-    // Using simple text icons that will render properly
-    if (icon_code == "01d") {
-        lv_label_set_text(weather_icon, "SUN");
-        lv_obj_set_style_text_color(weather_icon, lv_color_hex(0xFFDD00), 0);
-    } else if (icon_code == "01n") {
-        lv_label_set_text(weather_icon, "MOON");
-        lv_obj_set_style_text_color(weather_icon, lv_color_hex(0xCCCCFF), 0);
-    } else if (icon_code == "02d" || icon_code == "02n" ||
-               icon_code == "03d" || icon_code == "03n" ||
-               icon_code == "04d" || icon_code == "04n") {
-        lv_label_set_text(weather_icon, "CLOUD");
-        lv_obj_set_style_text_color(weather_icon, lv_color_hex(0xCCCCCC), 0);
-    } else if (icon_code == "09d" || icon_code == "09n" ||
-               icon_code == "10d" || icon_code == "10n") {
-        lv_label_set_text(weather_icon, "RAIN");
-        lv_obj_set_style_text_color(weather_icon, lv_color_hex(0x6699FF), 0);
-    } else if (icon_code == "11d" || icon_code == "11n") {
-        lv_label_set_text(weather_icon, "STORM");
-        lv_obj_set_style_text_color(weather_icon, lv_color_hex(0xFFDD00), 0);
-    } else if (icon_code == "13d" || icon_code == "13n") {
-        lv_label_set_text(weather_icon, "SNOW");
-        lv_obj_set_style_text_color(weather_icon, lv_color_hex(0xDDDDFF), 0);
-    } else if (icon_code == "50d" || icon_code == "50n") {
-        lv_label_set_text(weather_icon, "FOG");
-        lv_obj_set_style_text_color(weather_icon, lv_color_hex(0xAAAAAA), 0);
-    } else {
-        lv_label_set_text(weather_icon, "---");
-        lv_obj_set_style_text_color(weather_icon, lv_color_hex(0xCCCCCC), 0);
+    for (const auto &entry : ICON_MAP) {
+        if (icon_code == entry.code) {
+            icon = entry.image;
+            break;
+        }
     }
+
+    lv_img_set_src(weather_icon, icon);
 }
 
 // Update UI with weather data

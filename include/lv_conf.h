@@ -32,4 +32,6 @@
   #define LV_TICK_CUSTOM_SYS_TIME_EXPR (millis())
 #endif
 
+#define LV_USE_PNG 1
+
 #endif
