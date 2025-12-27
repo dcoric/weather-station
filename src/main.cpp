@@ -4,6 +4,7 @@
 #include <ArduinoJson.h>
 #include <lvgl.h>
 #include <TFT_eSPI.h>
+#include <time.h>
 #include "config.h"
 #include "weather_images.h"
 
@@ -20,6 +21,15 @@ lv_obj_t *city_label;
 lv_obj_t *update_label;
 lv_obj_t *status_label;
 lv_obj_t *weather_icon;
+lv_obj_t *forecast_container;
+
+struct ForecastUI {
+    lv_obj_t *day_label;
+    lv_obj_t *icon;
+    lv_obj_t *temp_label;
+};
+
+ForecastUI forecast_items[3];
 
 struct IconEntry {
     const char *code;
@@ -47,6 +57,9 @@ static const IconEntry ICON_MAP[] = {
     {"50n", &image_weather_icon_50n},
 };
 
+static const char *DAY_NAMES[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+static const uint16_t WEATHER_ICON_SOURCE_SIZE = 100;
+
 // Weather data
 struct WeatherData {
     float temperature;
@@ -59,6 +72,15 @@ struct WeatherData {
 };
 
 WeatherData weather;
+struct ForecastEntry {
+    String day;
+    float temp_min;
+    float temp_max;
+    String icon;
+    bool valid;
+};
+
+ForecastEntry forecast_data[3];
 unsigned long lastUpdate = 0;
 
 // Display flushing callback
@@ -72,6 +94,69 @@ void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color
     tft.endWrite();
 
     lv_disp_flush_ready(disp);
+}
+
+const lv_img_dsc_t *get_icon_for_code(const String &icon_code) {
+    for (const auto &entry : ICON_MAP) {
+        if (icon_code == entry.code) {
+            return entry.image;
+        }
+    }
+    return &image_weather_icon_01d;
+}
+
+void set_icon_size(lv_obj_t *img_obj, uint16_t size_px) {
+    if (!img_obj || WEATHER_ICON_SOURCE_SIZE == 0) {
+        return;
+    }
+    uint32_t zoom = (static_cast<uint32_t>(size_px) * 256U) / WEATHER_ICON_SOURCE_SIZE;
+    lv_img_set_zoom(img_obj, zoom);
+}
+
+void hide_status_message() {
+    if (!status_label) {
+        return;
+    }
+    lv_obj_add_flag(status_label, LV_OBJ_FLAG_HIDDEN);
+}
+
+void show_status_message(const char *message, uint32_t color) {
+    if (!status_label) {
+        return;
+    }
+    lv_label_set_text(status_label, message);
+    lv_obj_set_style_text_color(status_label, lv_color_hex(color), 0);
+    lv_obj_clear_flag(status_label, LV_OBJ_FLAG_HIDDEN);
+}
+
+void update_forecast_ui() {
+    for (int i = 0; i < 3; ++i) {
+        if (!forecast_items[i].day_label) {
+            continue;
+        }
+
+        if (forecast_data[i].valid) {
+            char temp_buffer[16];
+            snprintf(temp_buffer, sizeof(temp_buffer), "%.0f°/%.0f°", forecast_data[i].temp_max, forecast_data[i].temp_min);
+            lv_label_set_text(forecast_items[i].day_label, forecast_data[i].day.c_str());
+            lv_label_set_text(forecast_items[i].temp_label, temp_buffer);
+            lv_img_set_src(forecast_items[i].icon, get_icon_for_code(forecast_data[i].icon));
+        } else {
+            lv_label_set_text(forecast_items[i].day_label, "--");
+            lv_label_set_text(forecast_items[i].temp_label, "--°/--°");
+            lv_img_set_src(forecast_items[i].icon, &image_weather_icon_01d);
+        }
+    }
+}
+
+void reset_forecast_data() {
+    for (auto &entry : forecast_data) {
+        entry.valid = false;
+        entry.day = "";
+        entry.icon = "01d";
+        entry.temp_max = 0.0f;
+        entry.temp_min = 0.0f;
+    }
 }
 
 // Initialize LVGL display
@@ -102,80 +187,98 @@ void create_ui() {
     lv_obj_t *scr = lv_scr_act();
     lv_obj_set_style_bg_color(scr, lv_color_hex(0x1E1E1E), 0);
 
-    // Title bar
-    lv_obj_t *title_bar = lv_obj_create(scr);
-    lv_obj_set_size(title_bar, 240, 50);
-    lv_obj_set_pos(title_bar, 0, 0);
-    lv_obj_set_style_bg_color(title_bar, lv_color_hex(0x2196F3), 0);
-    lv_obj_set_style_border_width(title_bar, 0, 0);
-    lv_obj_set_style_radius(title_bar, 0, 0);
+    status_label = lv_label_create(scr);
+    lv_label_set_text(status_label, "");
+    lv_obj_set_style_text_color(status_label, lv_color_hex(0xFF5555), 0);
+    lv_obj_set_style_text_font(status_label, &lv_font_montserrat_14, 0);
+    lv_obj_align(status_label, LV_ALIGN_TOP_MID, 0, 6);
+    lv_obj_add_flag(status_label, LV_OBJ_FLAG_HIDDEN);
 
-    lv_obj_t *title = lv_label_create(title_bar);
-    lv_label_set_text(title, "Weather Station");
-    lv_obj_set_style_text_color(title, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_20, 0);
-    lv_obj_align(title, LV_ALIGN_CENTER, 0, 0);
-
-    // City label
     city_label = lv_label_create(scr);
     lv_label_set_text(city_label, "Loading...");
     lv_obj_set_style_text_color(city_label, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_text_font(city_label, &lv_font_montserrat_18, 0);
-    lv_obj_set_pos(city_label, 10, 60);
+    lv_obj_set_style_text_font(city_label, &lv_font_montserrat_20, 0);
+    lv_obj_align(city_label, LV_ALIGN_TOP_MID, 0, 16);
 
-    // Weather icon image placeholder
     weather_icon = lv_img_create(scr);
     lv_img_set_src(weather_icon, &image_weather_icon_01d);
-    lv_obj_align(weather_icon, LV_ALIGN_TOP_RIGHT, -8, 56);
+    lv_obj_align(weather_icon, LV_ALIGN_TOP_MID, 0, 10);
+    set_icon_size(weather_icon, 72);
 
-    // Temperature label
     temp_label = lv_label_create(scr);
     lv_label_set_text(temp_label, "--°C");
     lv_obj_set_style_text_color(temp_label, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_text_font(temp_label, &lv_font_montserrat_48, 0);
-    lv_obj_set_pos(temp_label, 10, 130);
+    lv_obj_set_style_text_font(temp_label, &lv_font_montserrat_36, 0);
+    lv_obj_align_to(temp_label, weather_icon, LV_ALIGN_TOP_MID, 0, 80);
 
-    // Weather description
     weather_label = lv_label_create(scr);
     lv_label_set_text(weather_label, "");
     lv_obj_set_style_text_color(weather_label, lv_color_hex(0xBBBBBB), 0);
-    lv_obj_set_style_text_font(weather_label, &lv_font_montserrat_16, 0);
-    lv_obj_set_pos(weather_label, 10, 200);
+    lv_obj_set_style_text_font(weather_label, &lv_font_montserrat_18, 0);
+    lv_obj_align_to(weather_label, temp_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 12);
 
-    // Humidity label
     humidity_label = lv_label_create(scr);
     lv_label_set_text(humidity_label, "Humidity: --%");
     lv_obj_set_style_text_color(humidity_label, lv_color_hex(0xBBBBBB), 0);
     lv_obj_set_style_text_font(humidity_label, &lv_font_montserrat_16, 0);
-    lv_obj_set_pos(humidity_label, 10, 230);
+    lv_obj_align_to(humidity_label, weather_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 8);
 
-    // Update time label
+    forecast_container = lv_obj_create(scr);
+    lv_obj_set_width(forecast_container, 220);
+    lv_obj_set_height(forecast_container, LV_SIZE_CONTENT);
+    lv_obj_align(forecast_container, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_set_style_bg_color(forecast_container, lv_color_hex(0x2A2A2A), 0);
+    lv_obj_set_style_border_width(forecast_container, 0, 0);
+    lv_obj_set_style_radius(forecast_container, 12, 0);
+    lv_obj_set_style_pad_all(forecast_container, 10, 0);
+    lv_obj_set_style_pad_row(forecast_container, 0, 0);
+    lv_obj_set_style_pad_column(forecast_container, 8, 0);
+    lv_obj_set_flex_flow(forecast_container, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(forecast_container, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(forecast_container, LV_OBJ_FLAG_SCROLLABLE);
+
+    for (int i = 0; i < 3; ++i) {
+        lv_obj_t *item = lv_obj_create(forecast_container);
+        lv_obj_set_width(item, 64);
+        lv_obj_set_height(item, LV_SIZE_CONTENT);
+        lv_obj_set_style_bg_color(item, lv_color_hex(0x1F1F1F), 0);
+        lv_obj_set_style_border_width(item, 0, 0);
+        lv_obj_set_style_radius(item, 10, 0);
+        lv_obj_set_style_pad_all(item, 4, 0);
+        lv_obj_set_flex_flow(item, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(item, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_row(item, 2, 0);
+
+        forecast_items[i].day_label = lv_label_create(item);
+        lv_label_set_text(forecast_items[i].day_label, "--");
+        lv_obj_set_style_text_color(forecast_items[i].day_label, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_text_font(forecast_items[i].day_label, &lv_font_montserrat_12, 0);
+        lv_obj_set_content_height(forecast_items[i].day_label, 15);
+
+        forecast_items[i].temp_label = lv_label_create(item);
+        lv_label_set_text(forecast_items[i].temp_label, "--°/--°");
+        lv_obj_set_style_text_color(forecast_items[i].temp_label, lv_color_hex(0xBBBBBB), 0);
+        lv_obj_set_style_text_font(forecast_items[i].temp_label, &lv_font_montserrat_10, 0);
+        lv_obj_set_content_height(forecast_items[i].temp_label, 12);
+
+        forecast_items[i].icon = lv_img_create(item);
+        lv_img_set_src(forecast_items[i].icon, &image_weather_icon_01d);
+        set_icon_size(forecast_items[i].icon, 24);
+        lv_obj_set_content_height(forecast_items[i].icon, 28);
+    }
+
     update_label = lv_label_create(scr);
     lv_label_set_text(update_label, "Last update: Never");
     lv_obj_set_style_text_color(update_label, lv_color_hex(0x888888), 0);
-    lv_obj_set_style_text_font(update_label, &lv_font_montserrat_12, 0);
-    lv_obj_set_pos(update_label, 10, 270);
+    lv_obj_set_style_text_font(update_label, &lv_font_montserrat_10, 0);
+    lv_obj_align_to(update_label, forecast_container, LV_ALIGN_OUT_TOP_MID, 0, -6);
 
-    // Status label
-    status_label = lv_label_create(scr);
-    lv_label_set_text(status_label, "Connecting to WiFi...");
-    lv_obj_set_style_text_color(status_label, lv_color_hex(0xFFAA00), 0);
-    lv_obj_set_style_text_font(status_label, &lv_font_montserrat_12, 0);
-    lv_obj_set_pos(status_label, 10, 295);
+    update_forecast_ui();
 }
 
 // Update weather icon based on OpenWeatherMap icon code
 void update_weather_icon(const String &icon_code) {
-    const lv_img_dsc_t *icon = &image_weather_icon_01d;
-
-    for (const auto &entry : ICON_MAP) {
-        if (icon_code == entry.code) {
-            icon = entry.image;
-            break;
-        }
-    }
-
-    lv_img_set_src(weather_icon, icon);
+    lv_img_set_src(weather_icon, get_icon_for_code(icon_code));
 }
 
 // Update UI with weather data
@@ -190,7 +293,9 @@ void update_ui() {
     lv_label_set_text(city_label, weather.city.c_str());
 
     String desc = weather.description;
-    desc[0] = toupper(desc[0]);
+    if (desc.length() > 0) {
+        desc[0] = toupper(desc[0]);
+    }
     lv_label_set_text(weather_label, desc.c_str());
 
     // Update weather icon
@@ -207,8 +312,7 @@ void update_ui() {
     }
     lv_label_set_text(update_label, update_str);
 
-    lv_label_set_text(status_label, "Status: OK");
-    lv_obj_set_style_text_color(status_label, lv_color_hex(0x00FF00), 0);
+    hide_status_message();
 }
 
 // Connect to WiFi
@@ -244,13 +348,13 @@ bool connect_wifi() {
         Serial.print("Signal strength (RSSI): ");
         Serial.print(WiFi.RSSI());
         Serial.println(" dBm");
+        hide_status_message();
         return true;
     } else {
         Serial.println("\nWiFi connection failed!");
         Serial.print("WiFi status: ");
         Serial.println(WiFi.status());
-        lv_label_set_text(status_label, "WiFi Failed!");
-        lv_obj_set_style_text_color(status_label, lv_color_hex(0xFF0000), 0);
+        show_status_message("WiFi Failed!", 0xFF0000);
         return false;
     }
 }
@@ -259,19 +363,16 @@ bool connect_wifi() {
 bool fetch_weather() {
     if (WiFi.status() != WL_CONNECTED) {
         Serial.println("WiFi not connected");
-        lv_label_set_text(status_label, "No WiFi");
-        lv_obj_set_style_text_color(status_label, lv_color_hex(0xFF0000), 0);
+        show_status_message("No WiFi", 0xFF0000);
         return false;
     }
 
     HTTPClient http;
     String url = "http://";
     url += WEATHER_API_HOST;
-    url += WEATHER_API_URL;
+    url += WEATHER_CURRENT_API_URL;
 
     Serial.println("Fetching weather data...");
-    lv_label_set_text(status_label, "Updating...");
-    lv_obj_set_style_text_color(status_label, lv_color_hex(0xFFAA00), 0);
     lv_timer_handler();
 
     http.begin(url);
@@ -302,13 +403,97 @@ bool fetch_weather() {
             return true;
         } else {
             Serial.println("JSON parsing failed");
-            lv_label_set_text(status_label, "Parse Error");
-            lv_obj_set_style_text_color(status_label, lv_color_hex(0xFF0000), 0);
+            show_status_message("Parse Error", 0xFF0000);
         }
     } else {
         Serial.printf("HTTP error: %d\n", httpCode);
-        lv_label_set_text(status_label, "API Error");
-        lv_obj_set_style_text_color(status_label, lv_color_hex(0xFF0000), 0);
+        show_status_message("API Error", 0xFF0000);
+    }
+
+    http.end();
+    return false;
+}
+
+bool fetch_forecast() {
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("WiFi not connected");
+        show_status_message("No WiFi", 0xFF0000);
+        return false;
+    }
+
+    HTTPClient http;
+    String url = "http://";
+    url += WEATHER_API_HOST;
+    url += WEATHER_FORECAST_API_URL;
+
+    Serial.println("Fetching forecast data...");
+    lv_timer_handler();
+
+    http.begin(url);
+    int httpCode = http.GET();
+
+    if (httpCode == 200) {
+        String payload = http.getString();
+        DynamicJsonDocument doc(32768);
+        DeserializationError error = deserializeJson(doc, payload);
+
+        if (!error) {
+            reset_forecast_data();
+            JsonArray list = doc["list"].as<JsonArray>();
+            int saved_days = 0;
+            int last_day = -1;
+            int reference_day = -1;
+
+            if (!list.isNull()) {
+                for (JsonVariant value : list) {
+                    time_t timestamp = static_cast<time_t>(value["dt"].as<long>());
+                    struct tm timeinfo;
+                    if (!gmtime_r(&timestamp, &timeinfo)) {
+                        continue;
+                    }
+
+                    if (reference_day == -1) {
+                        reference_day = timeinfo.tm_mday;
+                    }
+
+                    if (timeinfo.tm_mday == reference_day) {
+                        continue;
+                    }
+
+                    if (timeinfo.tm_mday == last_day) {
+                        continue;
+                    }
+
+                    ForecastEntry &entry = forecast_data[saved_days];
+                    entry.day = DAY_NAMES[timeinfo.tm_wday];
+                    entry.temp_min = value["main"]["temp_min"] | 0.0f;
+                    entry.temp_max = value["main"]["temp_max"] | 0.0f;
+                    String icon = value["weather"][0]["icon"].as<String>();
+                    if (icon.length() == 0) {
+                        icon = "01d";
+                    }
+                    entry.icon = icon;
+                    entry.valid = true;
+
+                    last_day = timeinfo.tm_mday;
+                    saved_days++;
+
+                    if (saved_days >= 3) {
+                        break;
+                    }
+                }
+            }
+
+            update_forecast_ui();
+            http.end();
+            return true;
+        } else {
+            Serial.println("Forecast JSON parsing failed");
+            show_status_message("Forecast Parse Error", 0xFF0000);
+        }
+    } else {
+        Serial.printf("Forecast HTTP error: %d\n", httpCode);
+        show_status_message("Forecast API Error", 0xFF0000);
     }
 
     http.end();
@@ -323,7 +508,9 @@ void setup() {
     create_ui();
 
     if (connect_wifi()) {
-        fetch_weather();
+        if (fetch_weather()) {
+            fetch_forecast();
+        }
     }
 }
 
@@ -332,7 +519,9 @@ void loop() {
     delay(5);
 
     if (millis() - lastUpdate > UPDATE_INTERVAL) {
-        fetch_weather();
+        if (fetch_weather()) {
+            fetch_forecast();
+        }
         lastUpdate = millis();
     }
 }

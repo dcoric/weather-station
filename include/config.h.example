@@ -10,12 +10,14 @@
 #define WEATHER_API_KEY "YOUR_API_KEY"
 #define WEATHER_CITY "New York"
 #define WEATHER_COUNTRY_CODE "US"
+#define WEATHER_UNITS "imperial" // standard, metric and imperial units are available. If you do not use the units parameter, standard units will be applied by default
 
 // Weather update interval (milliseconds)
 #define UPDATE_INTERVAL 900000  // 15 minutes
 
-// OpenWeatherMap API endpoint
+// OpenWeatherMap API endpoints
 #define WEATHER_API_HOST "api.openweathermap.org"
-#define WEATHER_API_URL "/data/2.5/weather?q=" WEATHER_CITY "," WEATHER_COUNTRY_CODE "&units=metric&appid=" WEATHER_API_KEY
+#define WEATHER_CURRENT_API_URL "/data/2.5/weather?q=" WEATHER_CITY "," WEATHER_COUNTRY_CODE "&units=" WEATHER_UNITS "&appid=" WEATHER_API_KEY
+#define WEATHER_FORECAST_API_URL "/data/2.5/forecast?q=" WEATHER_CITY "," WEATHER_COUNTRY_CODE "&units=" WEATHER_UNITS "&appid=" WEATHER_API_KEY
 
 #endif

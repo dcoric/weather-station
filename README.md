@@ -109,7 +109,8 @@ lv_obj_set_style_bg_color(title_bar, lv_color_hex(0x2196F3), 0);  // Title bar
 
 To use Fahrenheit instead of Celsius, edit `include/config.h`:
 ```cpp
-#define WEATHER_API_URL "/data/2.5/weather?q=" WEATHER_CITY "," WEATHER_COUNTRY_CODE "&units=imperial&appid=" WEATHER_API_KEY
+#define WEATHER_CURRENT_API_URL "/data/2.5/weather?q=" WEATHER_CITY "," WEATHER_COUNTRY_CODE "&units=imperial&appid=" WEATHER_API_KEY
+#define WEATHER_FORECAST_API_URL "/data/2.5/forecast?q=" WEATHER_CITY "," WEATHER_COUNTRY_CODE "&units=imperial&appid=" WEATHER_API_KEY
 ```
 
 Then update the display format in `src/main.cpp`:
