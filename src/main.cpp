@@ -223,16 +223,18 @@ void create_ui() {
     set_icon_size(weather_icon, 72);
 
     temp_label = lv_label_create(scr);
-    lv_label_set_text(temp_label, "--°C");
+    lv_label_set_text(temp_label, "--,-°C");
     lv_obj_set_style_text_color(temp_label, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(temp_label, &lv_font_montserrat_36, 0);
     lv_obj_align_to(temp_label, weather_icon, LV_ALIGN_TOP_MID, 0, 80);
 
     weather_label = lv_label_create(scr);
-    lv_label_set_text(weather_label, "");
+    lv_label_set_text(weather_label, "--------- ------");
     lv_obj_set_style_text_color(weather_label, lv_color_hex(0xBBBBBB), 0);
     lv_obj_set_style_text_font(weather_label, &lv_font_montserrat_18, 0);
-    lv_obj_align_to(weather_label, temp_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 12);
+    lv_obj_set_style_text_align(weather_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_width(weather_label, 240);
+    lv_obj_align(weather_label, LV_ALIGN_TOP_MID, 0, 142);
 
     humidity_label = lv_label_create(scr);
     lv_label_set_text(humidity_label, "Humidity: --%");
@@ -280,7 +282,7 @@ void create_ui() {
         lv_obj_set_style_transform_pivot_y(forecast_items[i].icon, 0, 0);
         lv_obj_set_style_border_width(forecast_items[i].icon, 2, 0);
         lv_obj_set_style_border_color(forecast_items[i].icon, lv_color_hex(0xFF0000), 0);
-    
+
         forecast_items[i].day_label = lv_label_create(item);
         lv_label_set_text(forecast_items[i].day_label, "--");
         lv_obj_set_style_text_color(forecast_items[i].day_label, lv_color_hex(0xFFFFFF), 0);
