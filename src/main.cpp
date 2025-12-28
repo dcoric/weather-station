@@ -69,7 +69,7 @@ struct WeatherData {
     String description;
     String icon;
     String city;
-    unsigned long last_update;
+    String last_update_time;
 };
 
 WeatherData weather;
@@ -176,6 +176,26 @@ void reset_forecast_data() {
         entry.temp_max = 0.0f;
         entry.temp_min = 0.0f;
     }
+}
+
+String format_update_time(long epoch_seconds, long timezone_offset_seconds) {
+    if (epoch_seconds <= 0) {
+        return String();
+    }
+
+    time_t adjusted_time = static_cast<time_t>(epoch_seconds + timezone_offset_seconds);
+    struct tm timeinfo;
+    if (!gmtime_r(&adjusted_time, &timeinfo)) {
+        return String();
+    }
+
+    char buffer[16];
+    size_t written = strftime(buffer, sizeof(buffer), "%H:%M", &timeinfo);
+    if (written == 0) {
+        return String();
+    }
+
+    return String(buffer);
 }
 
 // Initialize LVGL display
@@ -303,7 +323,7 @@ void create_ui() {
     }
 
     update_label = lv_label_create(scr);
-    lv_label_set_text(update_label, "Last update: Never");
+    lv_label_set_text(update_label, "Last update: --:--");
     lv_obj_set_style_text_color(update_label, lv_color_hex(0x888888), 0);
     lv_obj_set_style_text_font(update_label, &lv_font_montserrat_10, 0);
     lv_obj_align_to(update_label, forecast_container, LV_ALIGN_OUT_TOP_MID, 0, -6);
@@ -339,11 +359,10 @@ void update_ui() {
     sprintf(humidity_str, "Humidity: %d%%", weather.humidity);
     lv_label_set_text(humidity_label, humidity_str);
 
-    unsigned long minutes_ago = (millis() - weather.last_update) / 60000;
-    if (minutes_ago == 0) {
-        sprintf(update_str, "Last update: Just now");
+    if (weather.last_update_time.length() > 0) {
+        snprintf(update_str, sizeof(update_str), "Last update: %s", weather.last_update_time.c_str());
     } else {
-        sprintf(update_str, "Last update: %lu min ago", minutes_ago);
+        snprintf(update_str, sizeof(update_str), "Last update: --:--");
     }
     lv_label_set_text(update_label, update_str);
 
@@ -426,7 +445,9 @@ bool fetch_weather() {
             weather.description = doc["weather"][0]["description"].as<String>();
             weather.icon = doc["weather"][0]["icon"].as<String>();
             weather.city = doc["name"].as<String>();
-            weather.last_update = millis();
+            long update_epoch = doc["dt"] | 0L;
+            long timezone_offset = doc["timezone"] | 0L;
+            weather.last_update_time = format_update_time(update_epoch, timezone_offset);
 
             Serial.println("Weather data updated successfully");
             Serial.printf("Temperature: %.1f°C\n", weather.temperature);
