@@ -5,11 +5,15 @@
 #include <lvgl.h>
 #include <TFT_eSPI.h>
 #include <time.h>
+#include <XPT2046_Touchscreen.h>
 #include "config.h"
 #include "weather_images.h"
 
 // Display and LVGL objects
 TFT_eSPI tft = TFT_eSPI();
+SPIClass touch_spi = SPIClass(HSPI);
+XPT2046_Touchscreen touch_driver(TOUCH_CS, TOUCH_IRQ);
+static bool touch_ready = false;
 static lv_disp_draw_buf_t draw_buf;
 static lv_color_t buf[240 * 10];
 
@@ -60,6 +64,32 @@ static const IconEntry ICON_MAP[] = {
 static const char *DAY_NAMES[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
 static const uint16_t WEATHER_ICON_SOURCE_SIZE = 100;
 static const uint16_t FORECAST_ICON_SIZE = 44;
+static const uint16_t SCREEN_WIDTH = 240;
+static const uint16_t SCREEN_HEIGHT = 320;
+
+#ifndef TOUCH_MOSI
+#define TOUCH_MOSI 32
+#endif
+
+#ifndef TOUCH_MISO
+#define TOUCH_MISO 39
+#endif
+
+#ifndef TOUCH_CLK
+#define TOUCH_CLK 25
+#endif
+
+#ifndef TOUCH_IRQ
+#define TOUCH_IRQ 36
+#endif
+
+static const int16_t TOUCH_RAW_MIN_X = 200;
+static const int16_t TOUCH_RAW_MAX_X = 3900;
+static const int16_t TOUCH_RAW_MIN_Y = 200;
+static const int16_t TOUCH_RAW_MAX_Y = 3900;
+static const bool TOUCH_SWAP_XY = true;
+static const bool TOUCH_INVERT_X = false;
+static const bool TOUCH_INVERT_Y = true;
 
 // Weather data
 struct WeatherData {
@@ -83,6 +113,13 @@ struct ForecastEntry {
 
 ForecastEntry forecast_data[3];
 unsigned long lastUpdate = 0;
+
+static const uint8_t BRIGHTNESS_LEVELS[] = {84, 153, 255};
+static const uint8_t BRIGHTNESS_PERCENT[] = {33, 60, 100};
+static const uint8_t BACKLIGHT_PWM_CHANNEL = 0;
+static const uint32_t BACKLIGHT_PWM_FREQ = 5000;
+static const uint8_t BACKLIGHT_PWM_RESOLUTION = 8;
+static size_t brightness_index = 1;
 
 // Display flushing callback
 void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p) {
@@ -121,6 +158,36 @@ void set_icon_size_with_crop(lv_obj_t *img_obj, uint16_t size_px, float crop_fac
     // Apply crop_factor to zoom in and crop the transparent padding
     uint32_t zoom = (static_cast<uint32_t>(size_px * crop_factor) * 256U) / WEATHER_ICON_SOURCE_SIZE;
     lv_img_set_zoom(img_obj, zoom);
+}
+
+static lv_coord_t map_touch_coord(int32_t raw, int32_t raw_min, int32_t raw_max, lv_coord_t resolution, bool invert_axis) {
+    raw = constrain(raw, raw_min, raw_max);
+    long mapped = map(raw, raw_min, raw_max, 0, resolution - 1);
+    lv_coord_t coord = static_cast<lv_coord_t>(mapped);
+    if (invert_axis) {
+        coord = (resolution - 1) - coord;
+    }
+    return coord;
+}
+
+void my_touchpad_read(lv_indev_drv_t *indev_driver, lv_indev_data_t *data) {
+    LV_UNUSED(indev_driver);
+    static lv_coord_t last_x = SCREEN_WIDTH / 2;
+    static lv_coord_t last_y = SCREEN_HEIGHT / 2;
+    bool touched = false;
+
+    if (touch_ready && touch_driver.tirqTouched() && touch_driver.touched()) {
+        TS_Point p = touch_driver.getPoint();
+        int32_t raw_x = TOUCH_SWAP_XY ? p.y : p.x;
+        int32_t raw_y = TOUCH_SWAP_XY ? p.x : p.y;
+        last_x = map_touch_coord(raw_x, TOUCH_RAW_MIN_X, TOUCH_RAW_MAX_X, SCREEN_WIDTH, TOUCH_INVERT_X);
+        last_y = map_touch_coord(raw_y, TOUCH_RAW_MIN_Y, TOUCH_RAW_MAX_Y, SCREEN_HEIGHT, TOUCH_INVERT_Y);
+        touched = true;
+    }
+
+    data->state = touched ? LV_INDEV_STATE_PR : LV_INDEV_STATE_REL;
+    data->point.x = last_x;
+    data->point.y = last_y;
 }
 
 void hide_status_message() {
@@ -178,6 +245,35 @@ void reset_forecast_data() {
     }
 }
 
+void apply_backlight_level() {
+    ledcWrite(BACKLIGHT_PWM_CHANNEL, BRIGHTNESS_LEVELS[brightness_index]);
+    Serial.printf("Backlight set to %u%%\n", BRIGHTNESS_PERCENT[brightness_index]);
+}
+
+void init_backlight() {
+#ifdef TFT_BL
+    const uint8_t backlight_pin = TFT_BL;
+#else
+    const uint8_t backlight_pin = 21;
+#endif
+
+    ledcSetup(BACKLIGHT_PWM_CHANNEL, BACKLIGHT_PWM_FREQ, BACKLIGHT_PWM_RESOLUTION);
+    ledcAttachPin(backlight_pin, BACKLIGHT_PWM_CHANNEL);
+    apply_backlight_level();
+}
+
+void cycle_backlight_level() {
+    const size_t level_count = sizeof(BRIGHTNESS_LEVELS) / sizeof(BRIGHTNESS_LEVELS[0]);
+    brightness_index = (brightness_index + 1) % level_count;
+    apply_backlight_level();
+}
+
+void on_screen_click(lv_event_t *event) {
+    if (lv_event_get_code(event) == LV_EVENT_CLICKED) {
+        cycle_backlight_level();
+    }
+}
+
 String format_update_time(long epoch_seconds, long timezone_offset_seconds) {
     if (epoch_seconds <= 0) {
         return String();
@@ -202,13 +298,16 @@ String format_update_time(long epoch_seconds, long timezone_offset_seconds) {
 void lvgl_init() {
     lv_init();
 
-    // Turn on backlight
-    pinMode(21, OUTPUT);
-    digitalWrite(21, HIGH);
+    init_backlight();
 
     tft.begin();
     tft.setRotation(0);
     tft.fillScreen(TFT_BLACK);
+
+    touch_spi.begin(TOUCH_CLK, TOUCH_MISO, TOUCH_MOSI, TOUCH_CS);
+    touch_driver.begin(touch_spi);
+    touch_driver.setRotation(0);
+    touch_ready = true;
 
     lv_disp_draw_buf_init(&draw_buf, buf, NULL, 240 * 10);
 
@@ -219,6 +318,12 @@ void lvgl_init() {
     disp_drv.flush_cb = my_disp_flush;
     disp_drv.draw_buf = &draw_buf;
     lv_disp_drv_register(&disp_drv);
+
+    static lv_indev_drv_t indev_drv;
+    lv_indev_drv_init(&indev_drv);
+    indev_drv.type = LV_INDEV_TYPE_POINTER;
+    indev_drv.read_cb = my_touchpad_read;
+    lv_indev_drv_register(&indev_drv);
 }
 
 // Create UI
@@ -327,6 +432,15 @@ void create_ui() {
     lv_obj_set_style_text_color(update_label, lv_color_hex(0x888888), 0);
     lv_obj_set_style_text_font(update_label, &lv_font_montserrat_10, 0);
     lv_obj_align_to(update_label, forecast_container, LV_ALIGN_OUT_TOP_MID, 0, -6);
+
+    lv_obj_t *touch_layer = lv_obj_create(scr);
+    lv_obj_remove_style_all(touch_layer);
+    lv_obj_set_size(touch_layer, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_pos(touch_layer, 0, 0);
+    lv_obj_set_style_bg_opa(touch_layer, LV_OPA_TRANSP, 0);
+    lv_obj_clear_flag(touch_layer, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(touch_layer, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(touch_layer, on_screen_click, LV_EVENT_CLICKED, NULL);
 
     update_forecast_ui();
 }

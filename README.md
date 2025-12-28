@@ -88,6 +88,21 @@ TOUCH_CS = 33
 
 If your board uses different pins, update the `build_flags` section in `platformio.ini`.
 
+### Touchscreen & Brightness Control
+
+This project targets the ESP32-2432S028 series 2.8" ILI9341 display that exposes an XPT2046 touch controller on the HSPI bus. Besides `TOUCH_CS`, the following pins are defined in `platformio.ini` and can be adjusted for other hardware:
+
+```
+TOUCH_MOSI = 32
+TOUCH_MISO = 39
+TOUCH_CLK  = 25
+TOUCH_IRQ  = 36
+```
+
+The touch panel is calibrated in `src/main.cpp` through the `TOUCH_RAW_MIN_*`, `TOUCH_RAW_MAX_*`, `TOUCH_SWAP_XY`, and `TOUCH_INVERT_*` constants. Modify those values if taps appear mirrored or offset on your device.
+
+Every tap on the screen cycles the TFT backlight between 33 %, 60 %, and 100 %. The default level on boot is 60 %, and the percentages/PWM steps live in `BRIGHTNESS_LEVELS`/`BRIGHTNESS_PERCENT`. Adjust those arrays if you prefer different steps.
+
 ## Customization
 
 ### Update Interval
