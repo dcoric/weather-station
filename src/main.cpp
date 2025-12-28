@@ -5,6 +5,9 @@
 #include <lvgl.h>
 #include <TFT_eSPI.h>
 #include <time.h>
+#include <float.h>
+#include <limits.h>
+#include <algorithm>
 #include <XPT2046_Touchscreen.h>
 #include "config.h"
 #include "weather_images.h"
@@ -610,9 +613,20 @@ bool fetch_forecast() {
         if (!error) {
             reset_forecast_data();
             JsonArray list = doc["list"].as<JsonArray>();
-            int saved_days = 0;
-            int last_day = -1;
-            int reference_day = -1;
+
+            struct DailyAccumulator {
+                int yday;
+                int weekday;
+                float min_temp;
+                float max_temp;
+                bool has_values;
+                String icon;
+                int icon_score;
+            };
+
+            DailyAccumulator day_data[3];
+            int day_count = 0;
+            int reference_yday = -1;
 
             if (!list.isNull()) {
                 for (JsonVariant value : list) {
@@ -622,36 +636,81 @@ bool fetch_forecast() {
                         continue;
                     }
 
-                    if (reference_day == -1) {
-                        reference_day = timeinfo.tm_mday;
+                    if (reference_yday == -1) {
+                        reference_yday = timeinfo.tm_yday;
                     }
 
-                    if (timeinfo.tm_mday == reference_day) {
+                    if (timeinfo.tm_yday == reference_yday) {
                         continue;
                     }
 
-                    if (timeinfo.tm_mday == last_day) {
-                        continue;
+                    int idx = -1;
+                    for (int i = 0; i < day_count; ++i) {
+                        if (day_data[i].yday == timeinfo.tm_yday) {
+                            idx = i;
+                            break;
+                        }
                     }
 
-                    ForecastEntry &entry = forecast_data[saved_days];
-                    entry.day = DAY_NAMES[timeinfo.tm_wday];
-                    entry.temp_min = value["main"]["temp_min"] | 0.0f;
-                    entry.temp_max = value["main"]["temp_max"] | 0.0f;
+                    if (idx == -1) {
+                        if (day_count >= 3) {
+                            continue;
+                        }
+                        idx = day_count;
+                        day_data[idx].yday = timeinfo.tm_yday;
+                        day_data[idx].weekday = timeinfo.tm_wday;
+                        day_data[idx].min_temp = FLT_MAX;
+                        day_data[idx].max_temp = -FLT_MAX;
+                        day_data[idx].has_values = false;
+                        day_data[idx].icon = "";
+                        day_data[idx].icon_score = INT_MAX;
+                        day_count++;
+                    }
+
+                    float temp_min = value["main"]["temp_min"] | 0.0f;
+                    float temp_max = value["main"]["temp_max"] | temp_min;
+                    if (!day_data[idx].has_values) {
+                        day_data[idx].min_temp = temp_min;
+                        day_data[idx].max_temp = temp_max;
+                        day_data[idx].has_values = true;
+                    } else {
+                        day_data[idx].min_temp = min(day_data[idx].min_temp, temp_min);
+                        day_data[idx].max_temp = max(day_data[idx].max_temp, temp_max);
+                    }
+
                     String icon = value["weather"][0]["icon"].as<String>();
                     if (icon.length() == 0) {
                         icon = "01d";
                     }
-                    entry.icon = icon;
-                    entry.valid = true;
+                    int hour = timeinfo.tm_hour;
+                    int score = abs(hour - 12);
+                    if (day_data[idx].icon.length() == 0 || score < day_data[idx].icon_score) {
+                        day_data[idx].icon = icon;
+                        day_data[idx].icon_score = score;
+                    }
 
-                    last_day = timeinfo.tm_mday;
-                    saved_days++;
-
-                    if (saved_days >= 3) {
-                        break;
+                    if (day_count >= 3 && day_data[day_count - 1].has_values && timeinfo.tm_yday > day_data[day_count - 1].yday) {
+                        bool all_collected = true;
+                        for (int i = 0; i < day_count; ++i) {
+                            if (!day_data[i].has_values) {
+                                all_collected = false;
+                                break;
+                            }
+                        }
+                        if (all_collected) {
+                            break;
+                        }
                     }
                 }
+            }
+
+            for (int i = 0; i < day_count && i < 3; ++i) {
+                ForecastEntry &entry = forecast_data[i];
+                entry.day = DAY_NAMES[day_data[i].weekday];
+                entry.temp_min = day_data[i].has_values ? day_data[i].min_temp : 0.0f;
+                entry.temp_max = day_data[i].has_values ? day_data[i].max_temp : 0.0f;
+                entry.icon = day_data[i].icon.length() > 0 ? day_data[i].icon : "01d";
+                entry.valid = day_data[i].has_values;
             }
 
             update_forecast_ui();
