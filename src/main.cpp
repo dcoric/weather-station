@@ -59,7 +59,7 @@ static const IconEntry ICON_MAP[] = {
 
 static const char *DAY_NAMES[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
 static const uint16_t WEATHER_ICON_SOURCE_SIZE = 100;
-static const uint16_t FORECAST_ICON_SIZE = 32;
+static const uint16_t FORECAST_ICON_SIZE = 44;
 
 // Weather data
 struct WeatherData {
@@ -151,13 +151,16 @@ void update_forecast_ui() {
             lv_label_set_text(forecast_items[i].day_label, forecast_data[i].day.c_str());
             lv_label_set_text(forecast_items[i].temp_label, temp_buffer);
             lv_img_set_src(forecast_items[i].icon, get_icon_for_code(forecast_data[i].icon));
-            set_icon_size_with_crop(forecast_items[i].icon, FORECAST_ICON_SIZE, 1.5);
         } else {
             lv_label_set_text(forecast_items[i].day_label, "--");
             lv_label_set_text(forecast_items[i].temp_label, "--°/--°");
             lv_img_set_src(forecast_items[i].icon, &image_weather_icon_01d);
-            set_icon_size_with_crop(forecast_items[i].icon, FORECAST_ICON_SIZE, 1.5);
         }
+        // set_icon_size_with_crop(forecast_items[i].icon, FORECAST_ICON_SIZE, 1.8);
+
+        set_icon_size(forecast_items[i].icon, FORECAST_ICON_SIZE);
+        lv_obj_set_height(forecast_items[i].icon, FORECAST_ICON_SIZE);
+        lv_obj_set_style_transform_pivot_y(forecast_items[i].icon, 0, 0);
     }
 }
 
@@ -273,6 +276,8 @@ void create_ui() {
         set_icon_size_with_crop(forecast_items[i].icon, FORECAST_ICON_SIZE, 1.8);
         lv_obj_set_style_pad_all(forecast_items[i].icon, 0, 0);
         lv_obj_add_flag(forecast_items[i].icon, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+        lv_obj_set_height(forecast_items[i].icon, FORECAST_ICON_SIZE);
+        lv_obj_set_style_transform_pivot_y(forecast_items[i].icon, 0, 0);
         lv_obj_set_style_border_width(forecast_items[i].icon, 2, 0);
         lv_obj_set_style_border_color(forecast_items[i].icon, lv_color_hex(0xFF0000), 0);
     
