@@ -613,6 +613,16 @@ bool fetch_forecast() {
         if (!error) {
             reset_forecast_data();
             JsonArray list = doc["list"].as<JsonArray>();
+            long timezone_offset = doc["city"]["timezone"] | 0L;
+            int current_yday = -1;
+            time_t now_utc = time(nullptr);
+            if (now_utc > 0) {
+                time_t local_now = now_utc + timezone_offset;
+                struct tm now_info;
+                if (gmtime_r(&local_now, &now_info)) {
+                    current_yday = now_info.tm_yday;
+                }
+            }
 
             struct DailyAccumulator {
                 int yday;
@@ -626,21 +636,17 @@ bool fetch_forecast() {
 
             DailyAccumulator day_data[3];
             int day_count = 0;
-            int reference_yday = -1;
 
             if (!list.isNull()) {
                 for (JsonVariant value : list) {
-                    time_t timestamp = static_cast<time_t>(value["dt"].as<long>());
+                    long raw_timestamp = value["dt"] | 0L;
+                    time_t timestamp = static_cast<time_t>(raw_timestamp + timezone_offset);
                     struct tm timeinfo;
                     if (!gmtime_r(&timestamp, &timeinfo)) {
                         continue;
                     }
 
-                    if (reference_yday == -1) {
-                        reference_yday = timeinfo.tm_yday;
-                    }
-
-                    if (timeinfo.tm_yday == reference_yday) {
+                    if (current_yday != -1 && timeinfo.tm_yday == current_yday) {
                         continue;
                     }
 
