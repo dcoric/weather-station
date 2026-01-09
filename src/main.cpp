@@ -29,6 +29,7 @@ lv_obj_t *update_label;
 lv_obj_t *status_label;
 lv_obj_t *weather_icon;
 lv_obj_t *forecast_container;
+lv_obj_t *time_label;
 
 struct ForecastUI {
     lv_obj_t *day_label;
@@ -116,6 +117,8 @@ struct ForecastEntry {
 
 ForecastEntry forecast_data[3];
 unsigned long lastUpdate = 0;
+unsigned long lastTimeUpdate = 0;
+long global_timezone_offset = 0;
 
 static const uint8_t BRIGHTNESS_LEVELS[] = {84, 153, 255};
 static const uint8_t BRIGHTNESS_PERCENT[] = {33, 60, 100};
@@ -229,9 +232,9 @@ void update_forecast_ui() {
         // set_icon_size_with_crop(forecast_items[i].icon, FORECAST_ICON_SIZE, 1.8);
 
         set_icon_size(forecast_items[i].icon, FORECAST_ICON_SIZE);
-        lv_obj_set_style_translate_y(forecast_items[i].icon, -10, 0);
-        lv_obj_set_style_translate_y(forecast_items[i].day_label, -35, 0);
-        lv_obj_set_style_translate_y(forecast_items[i].temp_label, -35, 0);
+        lv_obj_set_style_translate_y(forecast_items[i].icon, -15, 0);
+        lv_obj_set_style_translate_y(forecast_items[i].day_label, -38, 0);
+        lv_obj_set_style_translate_y(forecast_items[i].temp_label, -38, 0);
 
         // lv_obj_set_height(forecast_items[i].icon, FORECAST_ICON_SIZE);
         // lv_obj_set_style_transform_pivot_y(forecast_items[i].icon, 0, 0);
@@ -297,6 +300,49 @@ String format_update_time(long epoch_seconds, long timezone_offset_seconds) {
     return String(buffer);
 }
 
+void configure_ntp_time() {
+    Serial.println("Configuring NTP time...");
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+
+    // Wait for time to be set
+    int retry = 0;
+    const int retry_count = 10;
+    while (time(nullptr) < 100000 && retry < retry_count) {
+        Serial.print(".");
+        delay(500);
+        retry++;
+    }
+
+    if (time(nullptr) < 100000) {
+        Serial.println("\nFailed to obtain time from NTP");
+    } else {
+        Serial.println("\nTime synchronized with NTP");
+    }
+}
+
+void update_time_display() {
+    if (!time_label) {
+        return;
+    }
+
+    time_t now_utc = time(nullptr);
+    if (now_utc < 100000) {
+        lv_label_set_text(time_label, "--:--");
+        return;
+    }
+
+    time_t local_time = now_utc + global_timezone_offset;
+    struct tm timeinfo;
+    if (!gmtime_r(&local_time, &timeinfo)) {
+        lv_label_set_text(time_label, "--:--");
+        return;
+    }
+
+    char time_buffer[32];
+    strftime(time_buffer, sizeof(time_buffer), "%H:%M", &timeinfo);
+    lv_label_set_text(time_label, time_buffer);
+}
+
 // Initialize LVGL display
 void lvgl_init() {
     lv_init();
@@ -349,9 +395,15 @@ void create_ui() {
     lv_obj_set_style_text_font(city_label, &lv_font_montserrat_20, 0);
     lv_obj_align(city_label, LV_ALIGN_TOP_MID, 0, 16);
 
+    time_label = lv_label_create(scr);
+    lv_label_set_text(time_label, "--:--");
+    lv_obj_set_style_text_color(time_label, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(time_label, &lv_font_montserrat_28, 0);
+    lv_obj_align(time_label, LV_ALIGN_TOP_MID, 0, 42);
+
     weather_icon = lv_img_create(scr);
     lv_img_set_src(weather_icon, &image_weather_icon_01d);
-    lv_obj_align(weather_icon, LV_ALIGN_TOP_MID, 0, 10);
+    lv_obj_align(weather_icon, LV_ALIGN_TOP_MID, 0, 35);
     set_icon_size(weather_icon, 72);
 
     temp_label = lv_label_create(scr);
@@ -366,7 +418,7 @@ void create_ui() {
     lv_obj_set_style_text_font(weather_label, &lv_font_montserrat_18, 0);
     lv_obj_set_style_text_align(weather_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_width(weather_label, 240);
-    lv_obj_align(weather_label, LV_ALIGN_TOP_MID, 0, 142);
+    lv_obj_align(weather_label, LV_ALIGN_TOP_MID, 0, 152);
 
     humidity_label = lv_label_create(scr);
     lv_label_set_text(humidity_label, "Humidity: --%");
@@ -376,7 +428,7 @@ void create_ui() {
 
     forecast_container = lv_obj_create(scr);
     lv_obj_set_width(forecast_container, 220);
-    lv_obj_set_height(forecast_container, 100); // LV_SIZE_CONTENT
+    lv_obj_set_height(forecast_container, 90);
     lv_obj_align(forecast_container, LV_ALIGN_BOTTOM_MID, 0, -5);
     lv_obj_set_style_bg_color(forecast_container, lv_color_hex(0x2A2A2A), 0);
     lv_obj_set_style_border_width(forecast_container, 0, 0);
@@ -394,7 +446,7 @@ void create_ui() {
         lv_obj_t *item = lv_obj_create(forecast_container);
         lv_obj_set_width(item, 64);
         lv_obj_set_height(item, LV_SIZE_CONTENT); // LV_SIZE_CONTENT
-        lv_obj_set_style_bg_color(item, lv_color_hex(0x1F1F1F), 0);
+        lv_obj_set_style_bg_color(item, lv_color_hex(0x2A2A2A), 0);
         lv_obj_set_style_border_width(item, 0, 0);
         lv_obj_set_style_radius(item, 10, 0);
         lv_obj_set_style_pad_all(item, 2, 0);
@@ -564,6 +616,7 @@ bool fetch_weather() {
             weather.city = doc["name"].as<String>();
             long update_epoch = doc["dt"] | 0L;
             long timezone_offset = doc["timezone"] | 0L;
+            global_timezone_offset = timezone_offset;
             weather.last_update_time = format_update_time(update_epoch, timezone_offset);
 
             Serial.println("Weather data updated successfully");
@@ -743,15 +796,23 @@ void setup() {
     create_ui();
 
     if (connect_wifi()) {
+        configure_ntp_time();
         if (fetch_weather()) {
             fetch_forecast();
         }
+        update_time_display();
     }
 }
 
 void loop() {
     lv_timer_handler();
     delay(5);
+
+    // Update time display every second
+    if (millis() - lastTimeUpdate > 1000) {
+        update_time_display();
+        lastTimeUpdate = millis();
+    }
 
     if (millis() - lastUpdate > UPDATE_INTERVAL) {
         if (fetch_weather()) {
