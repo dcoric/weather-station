@@ -16,6 +16,58 @@
 // Global configuration instance
 AppConfig appConfig;
 
+// Transliterate extended Latin characters to ASCII for display
+String transliterate_to_ascii(String str) {
+    // Serbian/Croatian/Bosnian characters
+    str.replace("š", "s");
+    str.replace("Š", "S");
+    str.replace("č", "c");
+    str.replace("Č", "C");
+    str.replace("ć", "c");
+    str.replace("Ć", "C");
+    str.replace("ž", "z");
+    str.replace("Ž", "Z");
+    str.replace("đ", "d");
+    str.replace("Đ", "D");
+    // German characters
+    str.replace("ü", "u");
+    str.replace("Ü", "U");
+    str.replace("ö", "o");
+    str.replace("Ö", "O");
+    str.replace("ä", "a");
+    str.replace("Ä", "A");
+    str.replace("ß", "ss");
+    // French characters
+    str.replace("é", "e");
+    str.replace("É", "E");
+    str.replace("è", "e");
+    str.replace("È", "E");
+    str.replace("ê", "e");
+    str.replace("Ê", "E");
+    str.replace("à", "a");
+    str.replace("À", "A");
+    str.replace("â", "a");
+    str.replace("Â", "A");
+    str.replace("ô", "o");
+    str.replace("Ô", "O");
+    str.replace("î", "i");
+    str.replace("Î", "I");
+    str.replace("ç", "c");
+    str.replace("Ç", "C");
+    // Spanish characters
+    str.replace("ñ", "n");
+    str.replace("Ñ", "N");
+    str.replace("á", "a");
+    str.replace("Á", "A");
+    str.replace("í", "i");
+    str.replace("Í", "I");
+    str.replace("ó", "o");
+    str.replace("Ó", "O");
+    str.replace("ú", "u");
+    str.replace("Ú", "U");
+    return str;
+}
+
 // Display and LVGL objects
 TFT_eSPI tft = TFT_eSPI();
 SPIClass touch_spi = SPIClass(HSPI);
@@ -518,9 +570,12 @@ void update_ui() {
     sprintf(temp_str, "%.1f°C", weather.temperature);
     lv_label_set_text(temp_label, temp_str);
 
-    lv_label_set_text(city_label, weather.city.c_str());
+    // Transliterate city name to ASCII for proper display
+    String displayCity = transliterate_to_ascii(weather.city);
+    lv_label_set_text(city_label, displayCity.c_str());
 
-    String desc = weather.description;
+    // Transliterate weather description to ASCII
+    String desc = transliterate_to_ascii(weather.description);
     if (desc.length() > 0) {
         desc[0] = toupper(desc[0]);
     }
