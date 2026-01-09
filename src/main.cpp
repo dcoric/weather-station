@@ -10,7 +10,11 @@
 #include <algorithm>
 #include <XPT2046_Touchscreen.h>
 #include "config.h"
+#include "sd_config.h"
 #include "weather_images.h"
+
+// Global configuration instance
+AppConfig appConfig;
 
 // Display and LVGL objects
 TFT_eSPI tft = TFT_eSPI();
@@ -538,11 +542,29 @@ void update_ui() {
     hide_status_message();
 }
 
+// WiFi status code to string
+const char* wifi_status_to_string(int status) {
+    switch(status) {
+        case WL_IDLE_STATUS: return "IDLE";
+        case WL_NO_SSID_AVAIL: return "NO_SSID_AVAILABLE";
+        case WL_SCAN_COMPLETED: return "SCAN_COMPLETED";
+        case WL_CONNECTED: return "CONNECTED";
+        case WL_CONNECT_FAILED: return "CONNECT_FAILED";
+        case WL_CONNECTION_LOST: return "CONNECTION_LOST";
+        case WL_DISCONNECTED: return "DISCONNECTED";
+        default: return "UNKNOWN";
+    }
+}
+
 // Connect to WiFi
 bool connect_wifi() {
+    Serial.println("\n=========================================");
     Serial.println("Starting WiFi connection...");
-    Serial.print("SSID: ");
-    Serial.println(WIFI_SSID);
+    Serial.println("=========================================");
+    Serial.printf("SSID: '%s'\n", appConfig.wifi_ssid);
+    Serial.printf("SSID Length: %d characters\n", strlen(appConfig.wifi_ssid));
+    Serial.printf("Password Length: %d characters\n", strlen(appConfig.wifi_password));
+    Serial.println("-----------------------------------------");
 
     // Disconnect any previous connection
     WiFi.disconnect(true);
@@ -552,8 +574,37 @@ bool connect_wifi() {
     WiFi.mode(WIFI_STA);
     delay(100);
 
+    // Scan for networks to verify SSID exists
+    Serial.println("Scanning for WiFi networks...");
+    int networksFound = WiFi.scanNetworks();
+    Serial.printf("Found %d networks:\n", networksFound);
+
+    bool ssidFound = false;
+    for (int i = 0; i < networksFound; i++) {
+        String ssid = WiFi.SSID(i);
+        int rssi = WiFi.RSSI(i);
+        String encryption = (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? "Open" : "Encrypted";
+
+        Serial.printf("  %d: %s (%d dBm) %s", i + 1, ssid.c_str(), rssi, encryption.c_str());
+
+        if (ssid == String(appConfig.wifi_ssid)) {
+            Serial.print(" <- TARGET NETWORK FOUND!");
+            ssidFound = true;
+        }
+        Serial.println();
+    }
+
+    if (!ssidFound) {
+        Serial.println("\n⚠️  WARNING: Target SSID not found in scan!");
+        Serial.println("    - Check SSID spelling in conf.txt");
+        Serial.println("    - Ensure network is 2.4GHz (ESP32 doesn't support 5GHz)");
+        Serial.println("    - Move closer to the router");
+    }
+
+    Serial.println("-----------------------------------------");
+
     // Begin WiFi connection
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    WiFi.begin(appConfig.wifi_ssid, appConfig.wifi_password);
     Serial.print("Connecting to WiFi");
 
     int attempts = 0;
@@ -561,22 +612,43 @@ bool connect_wifi() {
         delay(500);
         Serial.print(".");
         attempts++;
+
+        // Print status every 10 attempts
+        if (attempts % 10 == 0) {
+            Serial.printf("\n  Status after %d attempts: %s", attempts, wifi_status_to_string(WiFi.status()));
+        }
+
         lv_timer_handler();
     }
 
+    Serial.println(); // New line after dots
+
     if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("\nWiFi connected!");
-        Serial.print("IP address: ");
-        Serial.println(WiFi.localIP());
-        Serial.print("Signal strength (RSSI): ");
-        Serial.print(WiFi.RSSI());
-        Serial.println(" dBm");
+        Serial.println("=========================================");
+        Serial.println("✓ WiFi connected successfully!");
+        Serial.println("=========================================");
+        Serial.printf("IP address: %s\n", WiFi.localIP().toString().c_str());
+        Serial.printf("Gateway: %s\n", WiFi.gatewayIP().toString().c_str());
+        Serial.printf("Subnet: %s\n", WiFi.subnetMask().toString().c_str());
+        Serial.printf("DNS: %s\n", WiFi.dnsIP().toString().c_str());
+        Serial.printf("Signal strength (RSSI): %d dBm\n", WiFi.RSSI());
+        Serial.printf("Channel: %d\n", WiFi.channel());
+        Serial.println("=========================================\n");
         hide_status_message();
         return true;
     } else {
-        Serial.println("\nWiFi connection failed!");
-        Serial.print("WiFi status: ");
-        Serial.println(WiFi.status());
+        Serial.println("=========================================");
+        Serial.println("✗ WiFi connection FAILED!");
+        Serial.println("=========================================");
+        Serial.printf("Final status: %s\n", wifi_status_to_string(WiFi.status()));
+        Serial.printf("Attempts made: %d\n", attempts);
+        Serial.println("\nPossible issues:");
+        Serial.println("  1. Wrong password in conf.txt");
+        Serial.println("  2. SSID not found (check spelling)");
+        Serial.println("  3. Network is 5GHz (ESP32 only supports 2.4GHz)");
+        Serial.println("  4. Router security settings incompatible");
+        Serial.println("  5. Too far from router (weak signal)");
+        Serial.println("=========================================\n");
         show_status_message("WiFi Failed!", 0xFF0000);
         return false;
     }
@@ -591,11 +663,23 @@ bool fetch_weather() {
     }
 
     HTTPClient http;
-    String url = "http://";
-    url += WEATHER_API_HOST;
-    url += WEATHER_CURRENT_API_URL;
+    String url = "http://api.openweathermap.org/data/2.5/weather?q=";
+    url += appConfig.weather_city;
+    url += ",";
+    url += appConfig.weather_country_code;
+    url += "&units=";
+    url += appConfig.weather_units;
+    url += "&appid=";
+    url += appConfig.weather_api_key;
 
     Serial.println("Fetching weather data...");
+    Serial.print("API URL: http://api.openweathermap.org/data/2.5/weather?q=");
+    Serial.print(appConfig.weather_city);
+    Serial.print(",");
+    Serial.print(appConfig.weather_country_code);
+    Serial.print("&units=");
+    Serial.print(appConfig.weather_units);
+    Serial.println("&appid=********");
     lv_timer_handler();
 
     http.begin(url);
@@ -648,9 +732,14 @@ bool fetch_forecast() {
     }
 
     HTTPClient http;
-    String url = "http://";
-    url += WEATHER_API_HOST;
-    url += WEATHER_FORECAST_API_URL;
+    String url = "http://api.openweathermap.org/data/2.5/forecast?q=";
+    url += appConfig.weather_city;
+    url += ",";
+    url += appConfig.weather_country_code;
+    url += "&units=";
+    url += appConfig.weather_units;
+    url += "&appid=";
+    url += appConfig.weather_api_key;
 
     Serial.println("Fetching forecast data...");
     lv_timer_handler();
@@ -795,6 +884,9 @@ void setup() {
     lvgl_init();
     create_ui();
 
+    // Load configuration from SD card AFTER display init to avoid SPI conflicts
+    sd_config_load();
+
     if (connect_wifi()) {
         configure_ntp_time();
         if (fetch_weather()) {
@@ -814,7 +906,7 @@ void loop() {
         lastTimeUpdate = millis();
     }
 
-    if (millis() - lastUpdate > UPDATE_INTERVAL) {
+    if (millis() - lastUpdate > appConfig.update_interval) {
         if (fetch_weather()) {
             fetch_forecast();
         }

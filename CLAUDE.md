@@ -31,14 +31,32 @@ pio run --target clean
 
 ## Configuration
 
-Before building, copy [include/config.h.example](include/config.h.example) to [include/config.h](include/config.h) and configure:
+The weather station supports two configuration methods:
 
-- `WIFI_SSID` / `WIFI_PASSWORD`: WiFi credentials (2.4GHz only)
-- `WEATHER_API_KEY`: OpenWeatherMap API key (free tier at openweathermap.org/api)
-- `WEATHER_CITY` / `WEATHER_COUNTRY_CODE`: Location for weather data
-- `UPDATE_INTERVAL`: Weather refresh interval in milliseconds (default: 900000 = 15 minutes)
+### Method 1: SD Card Configuration (Recommended)
 
-**Note:** [config.h](include/config.h) is gitignored to protect credentials.
+1. Format a microSD card as FAT32 (32GB or less recommended)
+2. Copy [conf.txt.example](conf.txt.example) to the root of your SD card and rename it to `conf.txt`
+3. Edit `conf.txt` with your settings:
+   - `wifi_ssid` / `wifi_password`: WiFi credentials (2.4GHz only)
+   - `weather_api_key`: OpenWeatherMap API key (free tier at openweathermap.org/api)
+   - `weather_city` / `weather_country_code`: Location for weather data
+   - `weather_units`: "metric" for Celsius, "imperial" for Fahrenheit
+   - `update_interval`: Weather refresh interval in milliseconds (default: 900000 = 15 minutes)
+4. Insert the SD card into the ESP32-2432S028 slot
+5. The configuration will be loaded automatically on boot
+
+**Benefits:** No recompilation needed to change settings. Simply edit `conf.txt` on the SD card and restart the device.
+
+### Method 2: Hardcoded Configuration (Fallback)
+
+If no SD card is present or `conf.txt` is not found, the device will use values from [include/config.h](include/config.h):
+
+1. Copy [include/config.h.example](include/config.h.example) to [include/config.h](include/config.h)
+2. Edit the `#define` values with your settings
+3. Recompile and upload the firmware
+
+**Note:** [config.h](include/config.h) is gitignored to protect credentials. This method requires recompilation for any configuration changes.
 
 ## Architecture
 
@@ -47,6 +65,7 @@ Before building, copy [include/config.h.example](include/config.h.example) to [i
 [src/main.cpp](src/main.cpp) contains the entire application as a single-file implementation:
 
 1. **Initialization (`setup()`):**
+   - Load configuration from SD card or use [config.h](include/config.h) defaults
    - Initialize LVGL graphics library with TFT_eSPI display driver
    - Initialize XPT2046 touchscreen on HSPI bus
    - Configure PWM backlight control (GPIO 21)
@@ -56,7 +75,7 @@ Before building, copy [include/config.h.example](include/config.h.example) to [i
 
 2. **Main Loop (`loop()`):**
    - Process LVGL timer events (5ms intervals)
-   - Check for weather data refresh based on `UPDATE_INTERVAL`
+   - Check for weather data refresh based on configured update interval
 
 ### Display & Graphics
 
@@ -87,6 +106,18 @@ Two HTTP endpoints called sequentially:
 
 Both functions return `bool` for success/failure and update status messages on errors.
 
+### SD Card Configuration System
+
+Configuration management is handled by [include/sd_config.h](include/sd_config.h):
+
+- **Structure:** `AppConfig` struct holds all runtime configuration (WiFi, API keys, location, update interval)
+- **Initialization:** `sd_config_init()` mounts the SD card using VSPI pins (CS=5, MOSI=23, MISO=19, SCK=18)
+- **Loading:** `sd_config_load()` reads `/conf.txt` from SD card root directory. File format is simple key=value pairs, one per line. Comments start with `#` or `//`.
+- **Fallback:** If SD card is unavailable or `conf.txt` is missing, defaults from [config.h](include/config.h) are used automatically
+- **Parsing:** Line-based parser with string trimming, quote removal, and type conversion
+
+**Benefits:** Change WiFi credentials, API keys, or location without recompiling firmware. Ideal for deploying to multiple devices or sharing the project.
+
 ### Icon Mapping
 
 Weather icons are embedded in [include/weather_images.h](include/weather_images.h) (3.4MB file with 18 PNG images converted to C arrays). The `ICON_MAP` array maps OpenWeatherMap icon codes (e.g., "01d", "10n") to `lv_img_dsc_t` structures. Icons are scaled using `set_icon_size()` with LVGL zoom functions.
@@ -97,6 +128,7 @@ All pins defined in [platformio.ini](platformio.ini) as build flags:
 
 - **TFT Display (SPI):** MISO=12, MOSI=13, SCLK=14, CS=15, DC=2, RST=4, BL=21
 - **Touchscreen (HSPI):** CS=33, MOSI=32, MISO=39, CLK=25, IRQ=36
+- **SD Card (VSPI):** CS=5, MOSI=23, MISO=19, SCK=18
 
 ### LVGL Configuration
 

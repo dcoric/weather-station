@@ -1,0 +1,24 @@
+# ESP32 Weather Station Configuration File
+# Place this file as "conf.txt" in the root directory of your SD card
+# All settings from config.h can be overridden here
+# Lines starting with # are comments and will be ignored
+
+# WiFi Configuration
+# Note: ESP32 only supports 2.4GHz WiFi networks
+wifi_ssid=Your_WiFi_SSID
+wifi_password=Your_WiFi_Password
+
+# OpenWeatherMap API Configuration
+# Get your free API key at: https://openweathermap.org/api
+weather_api_key=your_api_key_here
+weather_city=Belgrade
+weather_country_code=RS
+
+# Weather Units
+# Options: "metric" for Celsius, "imperial" for Fahrenheit
+weather_units=metric
+
+# Update Interval (milliseconds)
+# Default: 900000 (15 minutes)
+# Free tier API limit: 60 calls/minute, 1000 calls/day
+update_interval=900000
